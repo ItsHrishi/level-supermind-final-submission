@@ -12,6 +12,9 @@ import time
 import json
 from urllib.parse import urljoin, urlparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from sklearn.preprocessing import MinMaxScaler
+import numpy as np
 
 class WebScraper:
     def __init__(self):
@@ -62,6 +65,49 @@ class WebScraper:
             return {
                 'url': url,
                 'title': "Error scraping content",
+                'content': f"Error: {str(e)}"
+            }
+
+    def extract_reddit_content(self, url: str) -> Dict:
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title = soup.find('h1').text.strip() if soup.find('h1') else "Title not found"
+            content = soup.find('div', {'data-test-id': 'post-content'}).text.strip() if soup.find('div', {'data-test-id': 'post-content'}) else "Content not found"
+            
+            return {
+                'url': url,
+                'title': title,
+                'content': content
+            }
+        except Exception as e:
+            return {
+                'url': url,
+                'title': "Error fetching post",
+                'content': f"Error: {str(e)}"
+            }
+
+    def extract_quora_content(self, url: str) -> Dict:
+        try:
+            response = requests.get(url, headers=self.headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title = soup.find('span', {'class': 'q-box qu-userSelect--text'}).text.strip() if soup.find('span', {'class': 'q-box qu-userSelect--text'}) else "Question not found"
+            answers = [answer.text.strip() for answer in soup.find_all('div', {'class': 'q-text qu-wordBreak--break-word'})]
+            content = "\n\n".join(answers[:3])
+            
+            return {
+                'url': url,
+                'title': title,
+                'content': content
+            }
+        except Exception as e:
+            return {
+                'url': url,
+                'title': "Error fetching Quora post",
                 'content': f"Error: {str(e)}"
             }
 
@@ -142,49 +188,6 @@ class ResearchAnalyzer:
             print(f"Error in Google search: {e}")
             return []
 
-    def extract_reddit_content(self, url: str) -> Dict:
-        try:
-            response = requests.get(url, headers=self.web_scraper.headers)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            title = soup.find('h1').text.strip() if soup.find('h1') else "Title not found"
-            content = soup.find('div', {'data-test-id': 'post-content'}).text.strip() if soup.find('div', {'data-test-id': 'post-content'}) else "Content not found"
-            
-            return {
-                'url': url,
-                'title': title,
-                'content': content
-            }
-        except Exception as e:
-            return {
-                'url': url,
-                'title': "Error fetching post",
-                'content': f"Error: {str(e)}"
-            }
-
-    def extract_quora_content(self, url: str) -> Dict:
-        try:
-            response = requests.get(url, headers=self.web_scraper.headers, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            title = soup.find('span', {'class': 'q-box qu-userSelect--text'}).text.strip() if soup.find('span', {'class': 'q-box qu-userSelect--text'}) else "Question not found"
-            answers = [answer.text.strip() for answer in soup.find_all('div', {'class': 'q-text qu-wordBreak--break-word'})]
-            content = "\n\n".join(answers[:3])
-            
-            return {
-                'url': url,
-                'title': title,
-                'content': content
-            }
-        except Exception as e:
-            return {
-                'url': url,
-                'title': "Error fetching Quora post",
-                'content': f"Error: {str(e)}"
-            }
-
     def generate_questions(self, domain: str, project: str, description: str) -> Dict[str, List[str]]:
         prompt = self.question_prompt.format(
             domain=domain,
@@ -228,34 +231,60 @@ class ResearchAnalyzer:
             'blogs': []
         }
         
+        # Collect all URLs for each category
+        general_urls = []
         for query in questions['general']:
-            results = self.search_google(query)
-            search_results['general'].extend(results)
+            general_urls.extend([result['link'] for result in self.search_google(query)])
             time.sleep(1)
         
+        reddit_urls = []
         for query in questions['reddit']:
             results = self.search_google(f"{query} site:reddit.com")
-            for result in results:
-                if 'reddit.com' in result['link'] and '/comments/' in result['link']:
-                    post_data = self.extract_reddit_content(result['link'])
-                    search_results['reddit'].append(post_data)
+            reddit_urls.extend([result['link'] for result in results if 'reddit.com' in result['link'] and '/comments/' in result['link']])
             time.sleep(1)
         
+        quora_urls = []
         for query in questions['quora']:
             results = self.search_google(f"{query} site:quora.com")
-            for result in results:
-                if 'quora.com' in result['link'] and '/answer/' in result['link']:
-                    post_data = self.extract_quora_content(result['link'])
-                    search_results['quora'].append(post_data)
+            quora_urls.extend([result['link'] for result in results if 'quora.com' in result['link'] and '/answer/' in result['link']])
             time.sleep(1)
         
+        blog_urls = []
         for query in questions['blog']:
             results = self.search_google(f"{query} blog OR article")
-            for result in results:
-                if self.web_scraper.is_blog_url(result['link']):
-                    post_data = self.web_scraper.scrape_url(result['link'])
-                    search_results['blogs'].append(post_data)
+            blog_urls.extend([result['link'] for result in results if self.web_scraper.is_blog_url(result['link'])])
             time.sleep(1)
+        
+        # Set number of worker threads
+        NUM_WORKERS = 500
+        
+        # Scrape general URLs
+        with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+            general_futures = [executor.submit(self.web_scraper.scrape_url, url) for url in general_urls]
+            for future in as_completed(general_futures):
+                result = future.result()
+                search_results['general'].append(result)
+        
+        # Scrape Reddit URLs
+        with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+            reddit_futures = [executor.submit(self.web_scraper.extract_reddit_content, url) for url in reddit_urls]
+            for future in as_completed(reddit_futures):
+                result = future.result()
+                search_results['reddit'].append(result)
+        
+        # Scrape Quora URLs
+        with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+            quora_futures = [executor.submit(self.web_scraper.extract_quora_content, url) for url in quora_urls]
+            for future in as_completed(quora_futures):
+                result = future.result()
+                search_results['quora'].append(result)
+        
+        # Scrape blog URLs
+        with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+            blog_futures = [executor.submit(self.web_scraper.scrape_url, url) for url in blog_urls]
+            for future in as_completed(blog_futures):
+                result = future.result()
+                search_results['blogs'].append(result)
         
         return search_results
 
@@ -305,31 +334,54 @@ class ResearchAnalyzer:
         
         return triggers, competitors
 
-    def parse_word_cloud(self, response: str) -> Dict[str, int]:
+    def parse_word_cloud(self, response: str) -> List[str]:
         """
-        Parse the word cloud data and return a dictionary of words and their scores.
+        Parse the word cloud data and return a list of words.
         """
         match = re.search(r'Word Cloud Data: \[(.*?)\]', response)
         if match:
             words = [word.strip(' "\'') for word in match.group(1).split(',')]
-            # Calculate word frequencies (scores)
-            word_frequencies = Counter(words)
-            return dict(word_frequencies)
+            return words
         else:
-            return {}
+            return []
 
-    def parse_pain_points(self, response: str) -> Dict[str, int]:
+    def parse_pain_points(self, response: str) -> List[str]:
         """
-        Parse the pain points and their scores from the AI's response.
+        Parse the pain points from the AI's response.
         """
         match = re.search(r'Pain Points: \[(.*?)\]', response)
         if match:
             pain_points = [point.strip(' "\'') for point in match.group(1).split(',')]
-            # Calculate pain point frequencies (scores)
-            pain_point_frequencies = Counter(pain_points)
-            return dict(pain_point_frequencies)
+            return pain_points
         else:
-            return {}
+            return []
+
+    def process_full_analysis_with_datastax(self, initial_analysis: str) -> Optional[str]:
+        """
+        Send the initial analysis to DataStax for refinement.
+        """
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.langflow_settings['APPLICATION_TOKEN']}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "langflow_id": self.langflow_settings["LANGFLOW_ID"],
+                "flow_id": self.langflow_settings["FLOW_ID"],
+                "input": initial_analysis,
+                "tweaks": self.langflow_settings["TWEAKS"]
+            }
+            response = requests.post(
+                f"{self.langflow_settings['BASE_API_URL']}/process",
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            refined_analysis = response.json().get("output", "")
+            return refined_analysis
+        except Exception as e:
+            print(f"Error processing analysis with DataStax: {e}")
+            return None
 
     def analyze(self, domain: str, project: str, description: str) -> Dict:
         try:
@@ -349,6 +401,11 @@ class ResearchAnalyzer:
                 data=formatted_data
             )
             initial_analysis = self.llm.predict(analysis_prompt)
+            
+            # Process initial analysis with DataStax
+            refined_analysis = self.process_full_analysis_with_datastax(initial_analysis)
+            if refined_analysis is None:
+                refined_analysis = initial_analysis  # Fallback to initial analysis if DataStax fails
             
             # Prompt for effective triggers and competitors
             triggers_competitors_prompt = f"""
@@ -397,45 +454,43 @@ class ResearchAnalyzer:
             
             # Prompt for word cloud data (changed to 20 keywords with scores)
             word_cloud_prompt = f"""
-            Given the domain, project, and description, extract the top 20 keywords or phrases for a word cloud, along with their frequency scores.
+        Given the domain, project, and description, extract the top 20 keywords or phrases for a word cloud.
 
-            Format your response exactly as follows:
-            Word Cloud Data: ["keyword1", "keyword2", ..., "keyword20"]
+        Format your response exactly as follows:
+        Word Cloud Data: ["keyword1", "keyword2", ..., "keyword20"]
 
-            Examples:
+        Examples:
 
-            1. Domain: Artificial Intelligence
-               Project: GPT Model Comparison
-               Description: Comprehensive research on performance differences between GPT models...
-               Word Cloud Data: ["GPT models", "accuracy", "speed", "cost-effectiveness", "use-case advantages", "scalability", "real-world applications", "performance", "comparison", "Claude", "language models", "AI", "machine learning", "NLP", "deep learning", "natural language processing", "model efficiency", "inference time", "training time", "hyperparameters", "neural networks", "transformers", "language understanding", "text generation", "AI research", "model evaluation", "benchmarking", "technological advancements", "artificial intelligence", "machine intelligence"]
+        1. Domain: Artificial Intelligence
+           Project: GPT Model Comparison
+           Description: Comprehensive research on performance differences between GPT models...
+           Word Cloud Data: ["GPT models", "accuracy", "speed", "cost-effectiveness", "use-case advantages", "scalability", "real-world applications", "performance", "comparison", "Claude", "language models", "AI", "machine learning", "NLP", "deep learning", "natural language processing", "model efficiency", "inference time", "training time", "hyperparameters", "neural networks", "transformers", "language understanding", "text generation", "AI research", "model evaluation", "benchmarking", "technological advancements", "artificial intelligence", "machine intelligence"]
 
-            2. Domain: Healthcare
-               Project: Telemedicine Adoption
-               Description: Analyze the adoption of telemedicine platforms...
-               Word Cloud Data: ["telemedicine", "patient satisfaction", "cost savings", "technological barriers", "rural areas", "healthcare", "adoption", "platforms", "accessibility", "health outcomes", "remote care", "telehealth", "virtual consultations", "health tech", "digital health", "patient engagement", "healthcare providers", "telemedicine platforms", "healthcare innovation", "telemedicine adoption", "healthcare technology"]
+        2. Domain: Healthcare
+           Project: Telemedicine Adoption
+           Description: Analyze the adoption of telemedicine platforms...
+           Word Cloud Data: ["telemedicine", "patient satisfaction", "cost savings", "technological barriers", "rural areas", "healthcare", "adoption", "platforms", "accessibility", "health outcomes", "remote care", "telehealth", "virtual consultations", "health tech", "digital health", "patient engagement", "healthcare providers", "telemedicine platforms", "healthcare innovation", "telemedicine adoption", "healthcare technology"]
 
-            3. Domain: Renewable Energy
-               Project: Solar Panel Efficiency
-               Description: Research the latest advancements in solar panel technology...
-               Word Cloud Data: ["solar panels", "efficiency improvements", "cost reduction", "environmental impact", "renewable energy", "technology", "durability", "energy output", "sustainability", "advancements", "solar energy", "photovoltaic cells", "solar power", "clean energy", "energy storage", "solar technology", "solar innovation", "solar efficiency", "solar advancements", "solar research", "solar industry"]
+        3. Domain: Renewable Energy
+           Project: Solar Panel Efficiency
+           Description: Research the latest advancements in solar panel technology...
+           Word Cloud Data: ["solar panels", "efficiency improvements", "cost reduction", "environmental impact", "renewable energy", "technology", "durability", "energy output", "sustainability", "advancements", "solar energy", "photovoltaic cells", "solar power", "clean energy", "energy storage", "solar technology", "solar innovation", "solar efficiency", "solar advancements", "solar research", "solar industry"]
 
-            4. Domain: E-commerce
-               Project: Customer Retention Strategies
-               Description: Investigate effective customer retention strategies for e-commerce platforms...
-               Word Cloud Data: ["customer retention", "personalized marketing", "loyalty programs", "post-purchase engagement", "e-commerce", "strategies", "customer feedback", "discounts", "platforms", "retention", "customer satisfaction", "customer experience", "retention strategies", "customer loyalty", "e-commerce platforms", "customer engagement", "marketing strategies", "customer behavior", "e-commerce trends", "customer retention techniques", "e-commerce growth"]
+        4. Domain: E-commerce
+           Project: Customer Retention Strategies
+           Description: Investigate effective customer retention strategies for e-commerce platforms...
+           Word Cloud Data: ["customer retention", "personalized marketing", "loyalty programs", "post-purchase engagement", "e-commerce", "strategies", "customer feedback", "discounts", "platforms", "retention", "customer satisfaction", "customer experience", "retention strategies", "customer loyalty", "e-commerce platforms", "customer engagement", "marketing strategies", "customer behavior", "e-commerce trends", "customer retention techniques", "e-commerce growth"]
 
-            Now, extract the top 20 keywords or phrases for a word cloud for:
+        Now, extract the top 20 keywords or phrases for a word cloud for:
 
-            Domain: {domain}
-            Project: {project}
-            Description: {description}
-            """
+        Domain: {domain}
+        Project: {project}
+        Description: {description}
+        """
             word_cloud_response = self.llm.predict(word_cloud_prompt)
             word_cloud_data = self.parse_word_cloud(word_cloud_response)
-            
-            # Prompt for pain points with scores
             pain_points_prompt = f"""
-            Given the domain, project, and description, extract the top 10 pain points users face with existing competitors, along with their frequency scores.
+            Given the domain, project, and description, extract the top 10 pain points users face with existing competitors.
 
             Format your response exactly as follows:
             Pain Points: ["pain_point1", "pain_point2", ..., "pain_point10"]
@@ -478,9 +533,9 @@ class ResearchAnalyzer:
                 'description': description,
                 'effective_triggers': effective_triggers,
                 'competitors': competitors,
-                'word_cloud_data': word_cloud_data,  # Now includes word scores
-                'pain_points': pain_points_data,  # Added pain points with scores
-                'full_analysis': initial_analysis,
+                'word_cloud_data': word_cloud_data,  # Now includes normalized word scores
+                'pain_points': pain_points_data,  # Pain points without scores
+                'full_analysis': refined_analysis,  # Refined analysis from DataStax
                 'timestamp': datetime.now().isoformat(),
                 'resource_links': resource_links  # Added resource links
             }
