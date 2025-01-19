@@ -12,4 +12,3 @@ aiohttp
 urllib3
 typing-extensions
 python-dateutil
-threadpoolexecutor-max-workers
