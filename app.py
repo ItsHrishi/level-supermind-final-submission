@@ -3,9 +3,8 @@ from langchain_google_community import GoogleSearchAPIWrapper
 import requests
 import warnings
 import os
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any  # Updated imports
 from datetime import datetime
-import requests
 from bs4 import BeautifulSoup
 import re
 import time
@@ -47,7 +46,7 @@ class WebScraper:
                 
         return ' '.join(text_content)
 
-    def scrape_url(self, url: str) -> Dict:
+    def scrape_url(self, url: str) -> Dict[str, Any]:  # Updated type annotation
         try:
             response = requests.get(url, headers=self.headers, timeout=10)
             response.raise_for_status()
@@ -68,7 +67,7 @@ class WebScraper:
                 'content': f"Error: {str(e)}"
             }
 
-    def extract_reddit_content(self, url: str) -> Dict:
+    def extract_reddit_content(self, url: str) -> Dict[str, Any]:  # Updated type annotation
         try:
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()
@@ -89,7 +88,7 @@ class WebScraper:
                 'content': f"Error: {str(e)}"
             }
 
-    def extract_quora_content(self, url: str) -> Dict:
+    def extract_quora_content(self, url: str) -> Dict[str, Any]:  # Updated type annotation
         try:
             response = requests.get(url, headers=self.headers, timeout=10)
             response.raise_for_status()
@@ -176,7 +175,7 @@ class ResearchAnalyzer:
             }
         }
 
-    def search_google(self, query: str) -> List[Dict]:
+    def search_google(self, query: str) -> List[Dict[str, Any]]:  # Updated type annotation
         try:
             results = self.google_search.results(query, num_results=3)
             return [{
@@ -223,7 +222,7 @@ class ResearchAnalyzer:
                     
             return questions
 
-    def search_and_collect(self, questions: Dict[str, List[str]]) -> Dict[str, List[Dict]]:
+    def search_and_collect(self, questions: Dict[str, List[str]]) -> Dict[str, List[Dict[str, Any]]]:  # Updated type annotation
         search_results = {
             'general': [],
             'reddit': [],
@@ -288,7 +287,7 @@ class ResearchAnalyzer:
         
         return search_results
 
-    def format_results(self, search_results: Dict[str, List[Dict]]) -> tuple[str, Dict[str, List[str]]]:
+    def format_results(self, search_results: Dict[str, List[Dict[str, Any]]]) -> Tuple[str, Dict[str, List[str]]]:  # Updated type annotation
         formatted_text = []
         sources = {
             'general': [],
@@ -309,7 +308,7 @@ class ResearchAnalyzer:
         
         return "\n".join(formatted_text), sources
 
-    def extract_resource_links(self, search_results: Dict[str, List[Dict]]) -> List[str]:
+    def extract_resource_links(self, search_results: Dict[str, List[Dict[str, Any]]]) -> List[str]:  # Updated type annotation
         links = []
         for category in search_results:
             for result in search_results[category]:
@@ -384,7 +383,7 @@ class ResearchAnalyzer:
             print(f"Error processing analysis with DataStax: {e}")
             return None
 
-    def analyze(self, domain: str, project: str, description: str) -> Dict:
+    def analyze(self, domain: str, project: str, description: str) -> Dict[str, Any]:  # Updated type annotation
         try:
             # Generate questions and collect data
             questions = self.generate_questions(domain, project, description)
