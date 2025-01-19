@@ -318,14 +318,15 @@ class ResearchAnalyzer:
                     links.append(url)
         return links
 
-    def parse_triggers_competitors(self, response: str) -> Tuple[List[str], List[str]]:
+    def parse_triggers_competitors(self, response: str) -> Tuple[List[Dict[str, int]], List[str]]:
         """
-        Parse the effective triggers and competitors from the AI's response.
+        Parse the effective triggers with weightage and competitors from the AI's response.
         """
         triggers_match = re.search(r'Effective Triggers: \[(.*?)\]', response)
         triggers = []
         if triggers_match:
-            triggers = [trigger.strip(' "\'') for trigger in triggers_match.group(1).split(',')]
+            triggers = [{"trigger": trigger.strip(' "\''), "weightage": int(weightage.strip())} 
+                        for trigger, weightage in re.findall(r'(\w+)\s*\((\d+)\)', triggers_match.group(1))]
         
         competitors_match = re.search(r'Competitors: \[(.*?)\]', response)
         competitors = []
@@ -409,10 +410,10 @@ class ResearchAnalyzer:
             
             # Prompt for effective triggers and competitors
             triggers_competitors_prompt = f"""
-            Given the domain, project, and description, extract the top 5 effective triggers and top 5 competitors as lists.
+            Given the domain, project, and description, extract the top 5 effective triggers with weightage (0-100) and top 5 competitors as lists.
 
             Format your response exactly as follows:
-            Effective Triggers: ["trigger1", "trigger2", "trigger3", "trigger4", "trigger5"]
+            Effective Triggers: ["trigger1 (weightage1)", "trigger2 (weightage2)", "trigger3 (weightage3)", "trigger4 (weightage4)", "trigger5 (weightage5)"]
             Competitors: ["competitor1", "competitor2", "competitor3", "competitor4", "competitor5"]
 
             Examples:
@@ -420,28 +421,28 @@ class ResearchAnalyzer:
             1. Domain: Artificial Intelligence
                Project: GPT Model Comparison
                Description: Comprehensive research on performance differences between GPT models...
-               Effective Triggers: ["accuracy", "speed", "cost-effectiveness", "use-case advantages", "scalability"]
+               Effective Triggers: ["accuracy (90)", "speed (85)", "cost-effectiveness (80)", "use-case advantages (75)", "scalability (70)"]
                Competitors: ["OpenAI", "Anthropic", "Google", "Microsoft", "Hugging Face"]
 
             2. Domain: Healthcare
                Project: Telemedicine Adoption
                Description: Analyze the adoption of telemedicine platforms...
-               Effective Triggers: ["patient satisfaction", "cost savings", "technological barriers", "accessibility", "health outcomes"]
+               Effective Triggers: ["patient satisfaction (95)", "cost savings (90)", "technological barriers (85)", "accessibility (80)", "health outcomes (75)"]
                Competitors: ["Teladoc", "Amwell", "Doctor on Demand", "MDLive", "Practo"]
 
             3. Domain: Renewable Energy
                Project: Solar Panel Efficiency
                Description: Research the latest advancements in solar panel technology...
-               Effective Triggers: ["efficiency improvements", "cost reduction", "environmental impact", "durability", "energy output"]
+               Effective Triggers: ["efficiency improvements (90)", "cost reduction (85)", "environmental impact (80)", "durability (75)", "energy output (70)"]
                Competitors: ["First Solar", "SunPower", "Canadian Solar", "JinkoSolar", "Trina Solar"]
 
             4. Domain: E-commerce
                Project: Customer Retention Strategies
                Description: Investigate effective customer retention strategies for e-commerce platforms...
-               Effective Triggers: ["personalized marketing", "loyalty programs", "post-purchase engagement", "customer feedback", "discounts"]
+               Effective Triggers: ["personalized marketing (95)", "loyalty programs (90)", "post-purchase engagement (85)", "customer feedback (80)", "discounts (75)"]
                Competitors: ["Amazon", "Shopify", "Walmart", "eBay", "Alibaba"]
 
-            Now, extract the top 5 effective triggers and top 5 competitors for:
+            Now, extract the top 5 effective triggers with weightage and top 5 competitors for:
 
             Domain: {domain}
             Project: {project}
