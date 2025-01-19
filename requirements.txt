@@ -1,0 +1,15 @@
+langchain-groq
+langchain-google-community
+requests
+beautifulsoup4
+numpy
+scikit-learn
+fastapi
+pydantic
+uvicorn
+python-multipart
+aiohttp
+urllib3
+typing-extensions
+python-dateutil
+threadpoolexecutor-max-workers
